@@ -34,19 +34,19 @@ blueprint:
           step: 1
     add_info_target:
       name: Info im Zieltitel anhängen
-      description: "Hängt \"(info: von <Quellliste>)\" an den Titel in der Ziel-Liste an."
+      description: 'Hängt "(info: von <Quellliste>)" an den Titel in der Ziel-Liste an.'
       default: true
       selector:
         boolean: {}
     add_info_sources:
       name: Info-Notiz in Quelllisten anlegen
-      description: "Legt eine kurze Notiz \"[info] verschoben zu <Zielliste>: <Titel>\" an und hakt sie direkt ab."
+      description: 'Legt eine kurze Notiz "[info] verschoben zu <Zielliste>: <Titel>" an und hakt sie direkt ab.'
       default: true
       selector:
         boolean: {}
     mark_completed:
       name: Quell-Items als erledigt markieren
-      description: "Setzt die verschobenen Einträge in den Quelllisten auf \"completed\"."
+      description: 'Setzt die verschobenen Einträge in den Quelllisten auf "completed".'
       default: true
       selector:
         boolean: {}
