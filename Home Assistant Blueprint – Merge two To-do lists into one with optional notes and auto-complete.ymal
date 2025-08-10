@@ -1,0 +1,220 @@
+blueprint:
+  name: ToDo » Merge Two Lists into Target List (with optional notes)
+  description: >
+    Merges all open items from two to-do lists into one target list.
+    Optional: Add info in target ("(info: from <Source List>)"), add info notes in source lists
+    (as completed item), and/or mark source items as completed.
+    Deduplication is case-insensitive. Triggers on changes in list A or B.
+  domain: automation
+  input:
+    source_a:
+      name: Source List A
+      selector:
+        entity:
+          domain: todo
+    source_b:
+      name: Source List B
+      selector:
+        entity:
+          domain: todo
+    target_list:
+      name: Target List
+      selector:
+        entity:
+          domain: todo
+    delay_seconds:
+      name: Delay after change (sec)
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: s
+          mode: slider
+          step: 1
+    add_info_target:
+      name: Append info in target title
+      description: 'Appends "(info: from <Source List>)" to the title in the target list.'
+      default: true
+      selector:
+        boolean: {}
+    add_info_sources:
+      name: Add info note in source lists
+      description: 'Creates a short note "[info] moved to <Target List>: <Title>" and immediately marks it as completed.'
+      default: true
+      selector:
+        boolean: {}
+    mark_completed:
+      name: Mark source items as completed
+      description: 'Sets the moved items in the source lists to "completed".'
+      default: true
+      selector:
+        boolean: {}
+
+mode: single
+
+triggers:
+  - platform: state
+    entity_id:
+      - !input source_a
+      - !input source_b
+
+conditions: []
+
+actions:
+  - delay:
+      seconds: !input delay_seconds
+
+  - variables:
+      src_a: !input source_a
+      src_b: !input source_b
+      tgt: !input target_list
+      opt_info_target: !input add_info_target
+      opt_info_sources: !input add_info_sources
+      opt_mark_completed: !input mark_completed
+
+      src_a_name: "{{ state_attr(src_a, 'friendly_name') }}"
+      src_b_name: "{{ state_attr(src_b, 'friendly_name') }}"
+      tgt_name: "{{ state_attr(tgt, 'friendly_name') }}"
+
+  - service: todo.get_items
+    target: { entity_id: !input source_a }
+    data: { status: needs_action }
+    response_variable: resp_a
+  - service: todo.get_items
+    target: { entity_id: !input source_b }
+    data: { status: needs_action }
+    response_variable: resp_b
+  - service: todo.get_items
+    target: { entity_id: !input target_list }
+    data: { status: needs_action }
+    response_variable: resp_c
+
+  - variables:
+      items_a: "{{ resp_a[src_a]['items'] | default([], true) }}"
+      items_b: "{{ resp_b[src_b]['items'] | default([], true) }}"
+      tgt_items: "{{ resp_c[tgt]['items'] | default([], true) }}"
+      tgt_summaries: "{{ tgt_items | map(attribute='summary') | map('trim') | map('lower') | list }}"
+
+  - condition: template
+    value_template: "{{ (items_a|count>0) or (items_b|count>0) }}"
+
+  # List A -> Target
+  - repeat:
+      for_each: "{{ items_a }}"
+      sequence:
+        - variables:
+            item_text: "{{ repeat.item.summary | trim }}"
+            target_title: >
+              {% if opt_info_target %}
+                {{ item_text }} (info: from {{ src_a_name }})
+              {% else %}
+                {{ item_text }}
+              {% endif %}
+        - if:
+            - condition: template
+              value_template: "{{ (item_text|lower) not in tgt_summaries }}"
+          then:
+            - service: todo.add_item
+              data:
+                entity_id: "{{ tgt }}"
+                item: "{{ target_title }}"
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ opt_info_sources }}"
+              sequence:
+                - variables:
+                    note_text: "[info] moved to {{ tgt_name }}: {{ item_text }}"
+                - service: todo.add_item
+                  data:
+                    entity_id: "{{ src_a }}"
+                    item: "{{ note_text }}"
+                - service: todo.get_items
+                  target: { entity_id: "{{ src_a }}" }
+                  data: { status: needs_action }
+                  response_variable: a_after_note
+                - variables:
+                    note_uid: >
+                      {{ (a_after_note[src_a]['items'] | default([], true)
+                          | selectattr('summary','equalto', note_text)
+                          | map(attribute='uid') | list | first) }}
+                - if:
+                    - condition: template
+                      value_template: "{{ note_uid is string }}"
+                  then:
+                    - service: todo.update_item
+                      data:
+                        entity_id: "{{ src_a }}"
+                        item: "{{ note_uid }}"
+                        status: completed
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ opt_mark_completed }}"
+              sequence:
+                - service: todo.update_item
+                  data:
+                    entity_id: "{{ src_a }}"
+                    item: "{{ repeat.item.uid }}"
+                    status: completed
+
+  # List B -> Target
+  - repeat:
+      for_each: "{{ items_b }}"
+      sequence:
+        - variables:
+            item_text: "{{ repeat.item.summary | trim }}"
+            target_title: >
+              {% if opt_info_target %}
+                {{ item_text }} (info: from {{ src_b_name }})
+              {% else %}
+                {{ item_text }}
+              {% endif %}
+        - if:
+            - condition: template
+              value_template: "{{ (item_text|lower) not in tgt_summaries }}"
+          then:
+            - service: todo.add_item
+              data:
+                entity_id: "{{ tgt }}"
+                item: "{{ target_title }}"
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ opt_info_sources }}"
+              sequence:
+                - variables:
+                    note_text: "[info] moved to {{ tgt_name }}: {{ item_text }}"
+                - service: todo.add_item
+                  data:
+                    entity_id: "{{ src_b }}"
+                    item: "{{ note_text }}"
+                - service: todo.get_items
+                  target: { entity_id: "{{ src_b }}" }
+                  data: { status: needs_action }
+                  response_variable: b_after_note
+                - variables:
+                    note_uid: >
+                      {{ (b_after_note[src_b]['items'] | default([], true)
+                          | selectattr('summary','equalto', note_text)
+                          | map(attribute='uid') | list | first) }}
+                - if:
+                    - condition: template
+                      value_template: "{{ note_uid is string }}"
+                  then:
+                    - service: todo.update_item
+                      data:
+                        entity_id: "{{ src_b }}"
+                        item: "{{ note_uid }}"
+                        status: completed
+        - choose:
+            - conditions:
+                - condition: template
+                  value_template: "{{ opt_mark_completed }}"
+              sequence:
+                - service: todo.update_item
+                  data:
+                    entity_id: "{{ src_b }}"
+                    item: "{{ repeat.item.uid }}"
+                    status: completed
